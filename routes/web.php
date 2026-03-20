@@ -22,6 +22,8 @@ use App\Http\Controllers\Main\DashboardController;
 Route::get('/', [HomeController::class, 'index'])->name('home');
 Route::get('/how-it-works', [HomeController::class, 'how_it_works'])->name('how_it_works');
 Route::get('/social', [HomeController::class, 'social'])->name('social');
+Route::get('/terms', [HomeController::class, 'terms'])->name('terms');
+Route::get('/privacy', [HomeController::class, 'privacy'])->name('privacy');
 
 Route::get('/register', [RegisterController::class, 'register'])->name('register');
 Route::post('/register', [RegisterController::class, 'store'])->name('register.store');
@@ -35,6 +37,7 @@ Route::middleware(['web','auth'])->group(function () {
      Route::get('/dashboard', [DashboardController::class, 'index'])->name('dashboard');
       Route::get('/dashboard/download/{file}', [DashboardController::class, 'download'])->name('dashboard.download');
     Route::post('/dashboard/upload', [DashboardController::class, 'upload'])->name('dashboard.upload');
+    Route::delete('/dashboard/delete/{file}', [DashboardController::class, 'destroy'])->name('dashboard.delete');
 });
 
 Route::middleware(['auth', 'admin'])->prefix('admin')->group(function () {

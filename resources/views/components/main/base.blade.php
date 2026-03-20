@@ -13,6 +13,8 @@
     <script src="https://cdn.jsdelivr.net/npm/piexifjs@1.0.6/piexif.min.js"></script>
     <!-- JSZip for multiple files download -->
     <script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
+    <!-- EXIF remover -->
+    <script src="{{ asset('assets/main/js/exif-remover.js') }}"></script>
 </head>
 
 <body>

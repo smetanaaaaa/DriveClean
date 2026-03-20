@@ -21,4 +21,12 @@ class HomeController extends Controller
         return view('main.social');
     }
 
+    public function terms() {
+        return view('main.terms');
+    }
+
+    public function privacy() {
+        return view('main.privacy');
+    }
+
 }

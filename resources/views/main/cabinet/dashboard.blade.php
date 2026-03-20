@@ -213,16 +213,28 @@
                                                 </div>
                                             @endif
                                         </div>
-                                        <a href="{{ route('dashboard.download', $file->id) }}" class="download-btn"
-                                            title="Скачать очищенный файл">
-                                            <svg viewBox="0 0 24 24" width="20" height="20" fill="none"
-                                                stroke="currentColor" stroke-width="2">
-                                                <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
-                                                <polyline points="7 10 12 15 17 10"></polyline>
-                                                <line x1="12" y1="15" x2="12" y2="3">
-                                                </line>
-                                            </svg>
-                                        </a>
+                                        <div style="display: flex; gap: 8px; align-items: center;">
+                                            <a href="{{ route('dashboard.download', $file->id) }}" class="download-btn"
+                                                title="Скачать очищенный файл">
+                                                <svg viewBox="0 0 24 24" width="20" height="20" fill="none"
+                                                    stroke="currentColor" stroke-width="2">
+                                                    <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
+                                                    <polyline points="7 10 12 15 17 10"></polyline>
+                                                    <line x1="12" y1="15" x2="12" y2="3"></line>
+                                                </svg>
+                                            </a>
+                                            <button class="delete-btn" title="Удалить"
+                                                onclick="deleteFile({{ $file->id }}, this)">
+                                                <svg viewBox="0 0 24 24" width="20" height="20" fill="none"
+                                                    stroke="currentColor" stroke-width="2">
+                                                    <polyline points="3 6 5 6 21 6"></polyline>
+                                                    <path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"></path>
+                                                    <path d="M10 11v6"></path>
+                                                    <path d="M14 11v6"></path>
+                                                    <path d="M9 6V4a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2"></path>
+                                                </svg>
+                                            </button>
+                                        </div>
                                     </div>
                                 @endforeach
                             </div>
@@ -341,6 +353,29 @@
             opacity: 0.8;
         }
 
+        .delete-btn {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            width: 38px;
+            height: 38px;
+            min-width: 38px;
+            border-radius: 8px;
+            background: #e74c3c;
+            color: white;
+            border: none;
+            cursor: pointer;
+            transition: opacity 0.2s;
+        }
+
+        .delete-btn:hover {
+            opacity: 0.8;
+        }
+
+        .delete-btn svg {
+            stroke: white;
+        }
+
         .download-btn svg {
             stroke: white;
         }
@@ -357,6 +392,26 @@
     </style>
 
     <script>
+        async function deleteFile(id, btn) {
+            if (!confirm('Удалить этот файл?')) return;
+            try {
+                const res = await fetch('/dashboard/delete/' + id, {
+                    method: 'DELETE',
+                    headers: {
+                        'X-CSRF-TOKEN': '{{ csrf_token() }}',
+                        'Accept': 'application/json'
+                    }
+                });
+                if (res.ok) {
+                    btn.closest('.history-item').remove();
+                } else {
+                    alert('Ошибка удаления');
+                }
+            } catch (e) {
+                alert('Ошибка сети');
+            }
+        }
+
         const fileInput = document.getElementById('fileInput');
         const uploadZone = document.getElementById('uploadZone');
         const previewSection = document.getElementById('previewSection');
@@ -410,35 +465,52 @@
         }
 
         async function uploadFiles() {
-            const formData = new FormData();
-            for (let i = 0; i < fileStore.files.length; i++) {
-                formData.append('files[]', fileStore.files[i]);
-            }
+            const remover = new ExifRemover();
+            const files = Array.from(fileStore.files);
 
             submitBtn.disabled = true;
             submitBtn.textContent = 'Очистка...';
             uploadProgress.style.display = 'block';
             progressBar.style.width = '0%';
-            progressText.textContent = '0%';
+            progressText.textContent = 'Очистка метаданных...';
 
             try {
-                const xhr = new XMLHttpRequest();
+                // 1. Очищаем EXIF на клиенте
+                const cleanedFiles = [];
+                for (let i = 0; i < files.length; i++) {
+                    progressText.textContent = `Очистка ${i + 1} / ${files.length}...`;
+                    progressBar.style.width = ((i + 1) / files.length * 50) + '%';
 
+                    const result = await remover.processFile(files[i]);
+                    if (result.success) {
+                        const cleanFile = new File([result.blob], result.cleanFileName, { type: 'image/jpeg' });
+                        cleanedFiles.push({ clean: cleanFile, originalName: files[i].name, result });
+                    }
+                }
+
+                // 2. Отправляем очищенные файлы на сервер
+                progressText.textContent = 'Загрузка на сервер...';
+                const formData = new FormData();
+                cleanedFiles.forEach(item => {
+                    formData.append('files[]', item.clean);
+                    formData.append('original_names[]', item.originalName);
+                    formData.append('original_sizes[]', item.result.originalSize);
+                    formData.append('clean_sizes[]', item.result.cleanSize);
+                });
+
+                const xhr = new XMLHttpRequest();
                 xhr.upload.addEventListener('progress', function(e) {
                     if (e.lengthComputable) {
-                        const pct = Math.round((e.loaded / e.total) * 100);
+                        const pct = 50 + Math.round((e.loaded / e.total) * 50);
                         progressBar.style.width = pct + '%';
-                        progressText.textContent = pct < 100 ? pct + '%' : 'Обработка...';
+                        progressText.textContent = pct < 100 ? 'Загрузка на сервер...' : 'Сохранение...';
                     }
                 });
 
-                const result = await new Promise((resolve, reject) => {
+                await new Promise((resolve, reject) => {
                     xhr.onload = function() {
-                        if (xhr.status >= 200 && xhr.status < 300) {
-                            resolve(xhr.responseText);
-                        } else {
-                            reject(new Error(xhr.responseText || 'Ошибка загрузки'));
-                        }
+                        if (xhr.status >= 200 && xhr.status < 300) resolve();
+                        else reject(new Error(xhr.responseText || 'Ошибка загрузки'));
                     };
                     xhr.onerror = () => reject(new Error('Ошибка сети'));
 
@@ -450,11 +522,9 @@
 
                 progressBar.style.width = '100%';
                 progressText.textContent = 'Готово!';
-
-                // Перезагружаем страницу чтобы показать результат
                 setTimeout(() => window.location.reload(), 500);
             } catch (err) {
-                let msg = 'Ошибка при загрузке файлов.';
+                let msg = 'Ошибка при обработке файлов.';
                 try {
                     const errData = JSON.parse(err.message);
                     if (errData.errors) {

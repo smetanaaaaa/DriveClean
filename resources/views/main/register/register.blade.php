@@ -103,8 +103,8 @@
                             <div class="form-group checkbox-group">
                                 <label class="checkbox-label">
                                     <input type="checkbox" name="agree_terms" required>
-                                    <span>Я согласен с <a href="#">условиями использования</a> и
-                                        политикой конфиденциальности</a></span>
+                                    <span>Я согласен с <a href="{{ route('terms') }}" target="_blank">условиями использования</a> и
+                                        <a href="{{ route('privacy') }}" target="_blank">политикой конфиденциальности</a></span>
                                 </label>
                             </div>
 

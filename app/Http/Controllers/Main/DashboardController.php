@@ -40,77 +40,31 @@ class DashboardController extends Controller
     {
         $request->validate([
             'files' => 'required|array',
-            'files.*' => 'required|file|mimes:jpg,jpeg,png,gif,bmp,webp|max:20480',
+            'files.*' => 'required|file|max:20480',
         ], [
             'files.required' => 'Выберите файлы для очистки.',
-            'files.*.mimes' => 'Поддерживаются только: JPG, PNG, WEBP, GIF, BMP.',
             'files.*.max' => 'Максимальный размер файла — 20 MB.',
         ]);
 
         $user = Auth::user();
         $results = [];
+        $originalNames = $request->input('original_names', []);
+        $originalSizes = $request->input('original_sizes', []);
+        $cleanSizes = $request->input('clean_sizes', []);
 
-        foreach ($request->file('files') as $file) {
-            $originalName = $file->getClientOriginalName();
+        foreach ($request->file('files') as $i => $file) {
+            $originalName = $originalNames[$i] ?? $file->getClientOriginalName();
             $fileType = $file->getMimeType();
-            $originalSize = $file->getSize();
+            $originalSize = (int) ($originalSizes[$i] ?? $file->getSize());
+            $cleanSize = (int) ($cleanSizes[$i] ?? $file->getSize());
+            $cleanName = $file->getClientOriginalName();
             $metadataRemoved = ['EXIF', 'GPS', 'IPTC', 'Thumbnail', 'Color Profile'];
 
-            $extension = strtolower($file->getClientOriginalExtension());
-            $cleanName = pathinfo($originalName, PATHINFO_FILENAME) . '_clean.' . $extension;
-
-            // Очистка EXIF через GD — пересоздаём изображение на чистом canvas
-            $cleanSize = $originalSize;
-            $tempPath = $file->getRealPath();
-            $cleanTempPath = null;
-
-            try {
-                $srcImage = $this->createImageFromFile($tempPath, $fileType);
-
-                if ($srcImage) {
-                    $width = imagesx($srcImage);
-                    $height = imagesy($srcImage);
-                    $cleanImage = imagecreatetruecolor($width, $height);
-
-                    // Прозрачность для PNG и GIF
-                    if (in_array($fileType, ['image/png', 'image/gif'])) {
-                        imagealphablending($cleanImage, false);
-                        imagesavealpha($cleanImage, true);
-                        $transparent = imagecolorallocatealpha($cleanImage, 0, 0, 0, 127);
-                        imagefilledrectangle($cleanImage, 0, 0, $width, $height, $transparent);
-                    }
-
-                    imagecopy($cleanImage, $srcImage, 0, 0, 0, 0, $width, $height);
-
-                    // Одна перекодировка с quality 85 — гарантирует уменьшение
-                    $cleanTempPath = tempnam(sys_get_temp_dir(), 'driveclean_');
-                    $this->saveImage($cleanImage, $cleanTempPath, $fileType, 85);
-                    // Если всё ещё больше оригинала — снижаем quality
-                    if (filesize($cleanTempPath) >= $originalSize) {
-                        $this->saveImage($cleanImage, $cleanTempPath, $fileType, 70);
-                    }
-
-                    imagedestroy($srcImage);
-                    imagedestroy($cleanImage);
-
-                    $cleanSize = filesize($cleanTempPath);
-                }
-            } catch (\Throwable $e) {
-                // Если GD не смог обработать — сохраняем оригинал
-                $cleanTempPath = null;
-            }
-
-            if ($cleanTempPath) {
-                $path = Storage::disk('public')->putFileAs(
-                    'cleaned/' . $user->id,
-                    new \Illuminate\Http\File($cleanTempPath),
-                    $cleanName
-                );
-                @unlink($cleanTempPath);
-            } else {
-                $path = $file->storeAs('cleaned/' . $user->id, $cleanName, 'public');
-                $cleanSize = $originalSize;
-            }
+            $path = $file->storeAs(
+                'cleaned/' . $user->id,
+                $cleanName,
+                'public'
+            );
 
             $record = CleanedFile::create([
                 'user_id' => $user->id,
@@ -141,28 +95,24 @@ class DashboardController extends Controller
         return back()->with('success', "Успешно очищено файлов: " . count($results));
     }
 
-    private function createImageFromFile(string $path, string $mime)
+    public function destroy(CleanedFile $file)
     {
-        return match ($mime) {
-            'image/jpeg', 'image/jpg' => @imagecreatefromjpeg($path),
-            'image/png' => @imagecreatefrompng($path),
-            'image/gif' => @imagecreatefromgif($path),
-            'image/webp' => @imagecreatefromwebp($path),
-            'image/bmp' => function_exists('imagecreatefrombmp') ? @imagecreatefrombmp($path) : null,
-            default => null,
-        };
-    }
+        if ($file->user_id !== Auth::id()) {
+            abort(403);
+        }
 
-    private function saveImage($image, string $path, string $mime, int $quality = 92): void
-    {
-        match ($mime) {
-            'image/jpeg', 'image/jpg' => imagejpeg($image, $path, $quality),
-            'image/png' => imagepng($image, $path, min(9, (int) round((100 - $quality) / 10))),
-            'image/gif' => imagegif($image, $path),
-            'image/webp' => imagewebp($image, $path, $quality),
-            'image/bmp' => function_exists('imagebmp') ? imagebmp($image, $path) : imagejpeg($image, $path, $quality),
-            default => imagejpeg($image, $path, $quality),
-        };
+        // Удаляем файл из хранилища
+        if ($file->storage_path && Storage::disk('public')->exists($file->storage_path)) {
+            Storage::disk('public')->delete($file->storage_path);
+        }
+
+        $file->delete();
+
+        if (request()->expectsJson()) {
+            return response()->json(['success' => true]);
+        }
+
+        return back()->with('success', 'Файл удалён.');
     }
 
     public function download(CleanedFile $file)
